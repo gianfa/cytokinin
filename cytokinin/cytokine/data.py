@@ -57,7 +57,7 @@ class Data:
         return self
     
     ### UTILS ###
-    def filesnames_to_ml_df(self, xcol=None, ycol=None, withAbsPath=False):
+    def filesnames_to_ml_df(self, xcol=None, ycol=None, withAbsPath=False, labels2cat=False):
         ''' Sticks a target column to self.filesnames
 
         '''
@@ -69,7 +69,15 @@ class Data:
         if type(ycol) == list or type(ycol) == np.ndarray:
             if len(ycol) != len(self.filesnames):
                 raise Exception('WrongArgument: ycol length is different from self.filesnames length')
-            df['y'] = np.array(ycol)
+            if labels2cat:
+                try:
+                    from keras.utils import to_categorical
+                    df['y'] = np.array(ycol)
+                    df['y'] = to_categorical(df['y'].values)
+                except ModuleNotFoundError as e:
+                    ERROR['missing_module']('keras')
+            else:
+                df['y'] = np.array(ycol)
         if withAbsPath:
             to_abs_path = lambda x: os.path.abspath(x) if type(x) != pathlib.PosixPath else x.absolute()
             df[x_col] = df[x_col].map(to_abs_path)
@@ -230,7 +238,7 @@ class Data:
 
     
     ## EXPORT ##
-    def export_to_keras(self, imagedatagenerator_args={}, flowfromdf_args={}):
+    def export_to_keras(self, imagedatagenerator_args={}, flowfromdf_args={}, labels2cat=True):
         try:
             from tensorflow.keras.preprocessing.image import ImageDataGenerator 
         except ModuleNotFoundError as e:
@@ -244,6 +252,7 @@ class Data:
             dataframe = self.filesnames_to_ml_df(xcol=x_col),
             x_col = x_col,
             y_col = y_col,
+            labels2cat = labels2cat,
             **flowfromdf_args
         )
         return ffdf
