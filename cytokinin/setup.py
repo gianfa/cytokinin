@@ -6,7 +6,7 @@ setup(
     description='Promotes data rooting and make your ML projects to flourish',
     author='Gianfrancesco Angelini',
     author_email='gian.angelini@hotmail.com',
-    packages=['cytokine'],
+    packages=['cytokinin'],
     install_requires=[
         'numpy',
         'matplotlib',
