@@ -1,4 +1,13 @@
 
+## ERRORS ##
+
+def error_wrong_argument(msg):
+    base = 'WrongArgument:'
+    raise Exception(f'{base} {msg}')
+
+def error_missing_argument(msg):
+    base = 'MissingArgument:'
+    raise Exception(f'{base} {msg}')
 
 def error_missing_module(mod):
     ref = None
@@ -14,5 +23,7 @@ def error_missing_module(mod):
     raise Exception(' '.join([msg, red]))
 
 ERROR = {
-    'missing_module': error_missing_module 
+    'missing_module': error_missing_module,
+    'wrong_argument': error_wrong_argument,
+    'missing_argument': error_missing_argument,
 }

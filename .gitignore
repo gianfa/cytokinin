@@ -1,6 +1,7 @@
 NOTES.md
+notes.md
 
-
+*.tries/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -1,21 +1,42 @@
+'''
+    Currently the main class of the library
+    TODO:
+        * fix exports in order to make stupidly easy to be used for fit()
+        * fix interactive labeling for CSV
+'''
+
 import os
 import pathlib
 import time
 import copy
 import shutil
+import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import cv2
 from cytokinin.config import ERROR
 
+from .utils import interactive
+
+logging.basicConfig()
+log = logging.getLogger()
+log.setLevel(logging.DEBUG)
+log.info('CYTOKININ LOADED')
+
 def take_data(datatype):
     return Data().take_data(datatype)
 
 class Data:
+    '''
+        Class of a Data root. Each Data root can be of only one datatype.
+    '''
     def __init__(self):
-        self.name = 'data'+ str(time.time()).replace('.','')
+        self.name = self.new_name()
+        self.parents = [] 
         self.filesnames = pd.Series([], name=self.name)
+        self.labels = pd.Series([], name=self.name)
         self.datatype  = None
         self.__allowed_datatypes = {
             'images': [
@@ -38,15 +59,31 @@ class Data:
             type(self),
             self.datatype,
             len(self.filesnames),
+            len(self.labels)
         )
-        txt = 'Object %s, of data type "%s", having %s file paths records.' % args
+        txt = 'Object %s, of data type "%s"\n, \
+            %s file paths stored\n \
+            %s labels stored.' \
+            % args
         return txt
+
+    def __len__(self):
+        '''
+            Number of filesname-label pairs
+        '''
+        if len(self.filesnames) != len(self.labels):
+            return 0
+        return self.filesnames
+    
+    
+    def new_name(self):
+        pred = 'data'
+        tstamp = str(time.time()).replace('.','')
+        new_name = f'{pred}{tstamp}'
+        return new_name
 
     def copy(self):
         return copy.deepcopy(self)
-
-    def length(self):
-        return len(self.filesnames)
 
     def take_data(self, datatype):
         if self.datatype:
@@ -56,32 +93,51 @@ class Data:
         self.datatype = datatype
         return self
     
-    ### UTILS ###
-    def filesnames_to_ml_df(self, xcol=None, ycol=None, withAbsPath=False, labels2cat=False):
+    ### ML dataset ###
+    def filesnames_to_ml_df(self,
+        xcol_name='X',ycol_name='y',ycol=None,
+        withAbsPath=False, labels2cat=False, y_as='str'):
         ''' Sticks a target column to self.filesnames
-
+            Args:
+                xcol_name (str):
+                ycol_name (str):
+                ycol (list/numpy.array):
+                withAbsPath (bool):
+                y_as (str): y col values type
+                    * 'str': strings;
+                    * 'categorical': Pandas 'category' type;
+                    * 'classnum': int referred to the class;
+                    * '1hot': binary matrix in 1-hot encoding, referred to the class.
         '''
-        x_col = self.name
-        if xcol and type(xcol) == str: x_col = xcol
-        df = self.filesnames.to_frame().rename(columns={self.name: x_col})
+        xcolName = self.name
+        if xcol_name and type(xcol_name) == str: xcolName = xcol_name
+        df = self.filesnames.to_frame()
         if not ycol:
-            df['y'] = self.name
+            df['y'] = self.name # no ycol -> assume all x are from one category
+        # if we have a ycol -> append it as y col
         if type(ycol) == list or type(ycol) == np.ndarray:
             if len(ycol) != len(self.filesnames):
                 raise Exception('WrongArgument: ycol length is different from self.filesnames length')
-            if labels2cat:
-                try:
-                    from keras.utils import to_categorical
-                    df['y'] = np.array(ycol)
-                    df['y'] = to_categorical(df['y'].values)
-                except ModuleNotFoundError as e:
-                    ERROR['missing_module']('keras')
-            else:
-                df['y'] = np.array(ycol)
+            df['y'] = np.array(ycol)
+        if y_as == 'str':
+            df['y'] = df['y'].astype(str)
+        if y_as == 'categorical':
+            df['y'] = df['y'].astype("category")
+        if y_as == 'classnum':
+            df['y'] == df['y'].astype("category").cat.codes
+        if y_as == '1hot':
+            df['y'] == pd.get_dummies(df['y']).values
         if withAbsPath:
             to_abs_path = lambda x: os.path.abspath(x) if type(x) != pathlib.PosixPath else x.absolute()
-            df[x_col] = df[x_col].map(to_abs_path)
+            df[xcolName] = df[xcolName].map(to_abs_path)
+        df.rename(columns={self.name: xcolName, 'y': ycol_name}, inplace=True)  
         return df
+
+    #TODO
+    def export_dataset_as(self, dstype):
+        if dstype not in ['dataframe', 'csv']:
+            ERROR['wrong_argument']('')
+        return  
 
     ### STORE ###
     def store_filesnames_from_df(self, df, col='fnames', exts=None, notallowedfiles='ignore',  notfiles='ignore', uniques=True,  verbose=False):
@@ -120,16 +176,17 @@ class Data:
         else: EXTS = self.__allowed_datatypes
         
         temp_flist=set()
-        for f in flist:
+        for fl in flist:
+            f = Path(fl)
             verified = True
             # verify extensions
-            if not f.rpartition('.')[-1].lower() in EXTS:
+            if not f.suffix in EXTS:
                 if notallowedfiles == 'except':
                     raise Exception('Other file extensions were found.')
                 if notallowedfiles == 'ignore':
                     pass
             # verify existence
-            if not os.path.isfile(f):
+            if not f.is_file():
                 import matplotlib.pyplot as plt
                 if notfiles == 'except':
                     raise Exception('File "{fp}" not found!'.format(fp=f))
@@ -144,14 +201,83 @@ class Data:
         if verbose: print('{n} files added to {c} set'.format(n=len(self.filesnames), c=self.name))
         return self
 
-    def store_filesnames_from_folder(self, folderpath, exts=None, notallowedfiles='ignore',  notfiles='ignore', uniques=True, verbose=False):
-        if not os.path.isdir(folderpath):
-            raise Exception('{fn} not found as folder path'.format(fn=folderpath))
+    def store_filesnames_from_folder(self, folderpath=None, include_subdirs=True, exts=None, notallowedfiles='ignore',  notfiles='ignore', uniques=True, verbose=False, gui=False):
+        '''
+            folderpath,
+            include_subdirs,
+            exts,
+            notallowedfiles,
+            notfiles,
+            uniques,
+            verbose,
+            gui (bool): if True allows you to select af folder from a dialog 
+        '''
+        if not folderpath and not gui:
+            ERROR['missing_argument'](f'You must specify at least one argument between \'folderfile\' or \'gui\'!')
+        folder = folderpath
+        if gui:
+            folder = interactive.select_folder()
+        if not os.path.isdir(folder):
+            raise Exception('{fn} not found as folder path'.format(fn=folder))
         flist = []
-        for root, dirs, files in os.walk(folderpath, topdown=False):
-            for f in files:
-                flist.append(os.path.join(root, f))
+        if not include_subdirs:
+            flist = os.listdir(folder)
+        else:
+            for root, dirs, files in os.walk(folder, topdown=False):
+                for f in files:
+                    flist.append(os.path.join(root, f))
         return self.store_filesnames_from_list(flist)
+
+
+    ### UTILS ###
+    def is_df(self, o):
+        return isinstance(o, pd.DataFrame)
+
+    def is_series(self, o):
+        return isinstance(o, pd.Series)
+
+    ### LABEL ###
+    def label_from_folder(self):
+        '''
+            Reads the path of the stored filesnames and uses
+            its parent folder name as label.
+        '''
+        if len(self.filesnames) == 0:
+            log.warn(f'{self.name} Data hasn\'t any filesname to label yet')
+            return
+        self.labels = self.filesnames.apply(lambda x: x.parent.name)
+        return
+
+    def label_from_csv(self, filepath=None, col=None, gui=False, **kwargs):
+        '''
+            User must provide a col name
+            Args:
+                filepath (str): filepath
+                col (str):
+                gui (bool):
+        '''
+        #TODO: maybe provide a wizard to get columns names of csv
+        #
+        if len(self.filesnames) == 0:
+            log.warn(f'{self.name} Data hasn\'t any filesname to label yet')
+            return
+        if not filepath and not gui:
+            ERROR['missing_argument'](f'You must specify at least one argument between \'filepath\' or \'gui\'!')
+        if not gui and type(filepath) != str: raise Exception(f'Wrong argument: You must provide a CSV path a str, instead it was {type(filepath)}')
+        if not gui and not col or type(col) != str: raise Exception('You must provide a col name as str')
+        
+        fpath = None
+        if gui:
+            fpath = interactive.select_filename()
+        df = pd.read_csv(fpath, usecols=[col])
+        fn_len = len(self.filesnames)
+        if not len(df) == fn_len:
+            raise Exception(f'Mismatching dimensions between stored filenames {fn_len} and labels {len(df)}!')
+        self.labels = df[col]
+        return
+
+    ## SHOW ##
+    #TODO: Sliceable as MutableSequence https://docs.python.org/3/library/collections.abc.html#collections.abc.MutableMapping
 
     ## TO ##
     def to(self, outtype='list', array_mode=None, limit_from=0, limit_to=None ):
@@ -164,12 +290,13 @@ class Data:
         if limit_to: out = self.filesnames[limit_from:limit_to]
         else: out = self.filesnames[limit_from:]
         # return the set
-        if outtype == 'list': return self.filesnames.to_list()
+        if outtype == 'list': return self.filesnames.astype(str).to_list()
+        if outtype == 'pathlist': return self.filesnames.to_list()
         if outtype == 'dataframe': return self.filesnames.to_frame()
         if outtype == 'series': return self.filesnames
         if outtype == 'arrays':
             al = self.filesnames.to_list()
-            if not array_mode: return [ cv2.imread(f) for f in al ]
+            if not array_mode: return [ cv2.imread(str(f)) for f in al ]
             if not array_mode in map2cv2.keys():
                 raise Exception('Invalid "array_mode" argument! it must be "rgb" or "gray"')
             return [ cv2.imread(f, map2cv2[array_mode]) for f in al ]
@@ -186,6 +313,7 @@ class Data:
             flist, exts=exts, notallowedfiles=notallowedfiles,
             notfiles=notfiles, uniques=uniques, verbose=verbose
         )
+        return self
 
     ## EXPELL ##
     def expell_to(self, path, inthisnewfolder=None, namefilesas=None, asprefix=True, ascopy=True):
@@ -243,18 +371,26 @@ class Data:
             from tensorflow.keras.preprocessing.image import ImageDataGenerator 
         except ModuleNotFoundError as e:
             ERROR['missing_module']('tensorflow')
-        # https://colab.research.google.com/drive/1rH6ajx5MYKAH72EfDhWGaLvCCSzOBegf
         
+        xcol_name = 'filename'
+        ycol_name = 'class'
+        mldf = self.filesnames_to_ml_df(
+                    xcol_name=xcol_name,
+                    ycol_name=ycol_name,
+                    labels2cat = labels2cat,
+                )
         dg = ImageDataGenerator(**imagedatagenerator_args)
-        x_col = 'filesname'
-        y_col = 'y'
         ffdf = dg.flow_from_dataframe(
-            dataframe = self.filesnames_to_ml_df(xcol=x_col),
-            x_col = x_col,
-            y_col = y_col,
-            labels2cat = labels2cat,
+            dataframe = mldf,
+            class_mode='categorical',
             **flowfromdf_args
         )
+        nclx = len(mldf[ycol_name].unique())
+        if nclx < 2:
+            ertxt = f'The dataset contains only {nclx} classes. \
+                Keep in mind that you must provide at least two classes\
+                if you want to perform a fit in keras 😊.'
+            log.warning(ertxt)
         return ffdf
 
     def export_to_fastAI(self, imagedatabunch_args={}):
