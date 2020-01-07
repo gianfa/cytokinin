@@ -3,15 +3,16 @@
     TODO:
         * fix exports in order to make stupidly easy to be used for fit()
         * fix interactive labeling for CSV
+        * replace "rais Exception ..." expressions with ERROR[.....] from config.py
 '''
 
 import os
 import pathlib
+from pathlib import Path, PosixPath
 import time
 import copy
 import shutil
 import logging
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ import cv2
 from cytokinin.config import ERROR
 
 from .utils import interactive
+from .utils.funx import infer_file_cols_dtypes
 
 logging.basicConfig()
 log = logging.getLogger()
@@ -263,12 +265,15 @@ class Data:
             return
         if not filepath and not gui:
             ERROR['missing_argument'](f'You must specify at least one argument between \'filepath\' or \'gui\'!')
-        if not gui and type(filepath) != str: raise Exception(f'Wrong argument: You must provide a CSV path a str, instead it was {type(filepath)}')
-        if not gui and not col or type(col) != str: raise Exception('You must provide a col name as str')
+        if not gui and (type(filepath) != str and type(filepath) != PosixPath): raise Exception(f'Wrong argument: You must provide a CSV path a str or PosixPath, instead it was {type(filepath)}')
+        if not gui and not col or type(col) != str:
+            raise Exception('You must provide a col name as str')
         
-        fpath = None
+        fpath = filepath
         if gui:
-            fpath = interactive.select_filename()
+            fpath = interactive.select_filename(title='Select a CSV file')
+            col = interactive.select_df_col(fpath, ftype='csv')
+    
         df = pd.read_csv(fpath, usecols=[col])
         fn_len = len(self.filesnames)
         if not len(df) == fn_len:

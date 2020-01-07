@@ -22,8 +22,14 @@ def error_missing_module(mod):
     "{n}" module.'.format(n = mod)
     raise Exception(' '.join([msg, red]))
 
+def error_invalid_path(msg):
+    base = 'InvalidPath:'
+    raise Exception(f'{base} {msg}')
+
+
 ERROR = {
     'missing_module': error_missing_module,
     'wrong_argument': error_wrong_argument,
     'missing_argument': error_missing_argument,
+    'error_invalid_path': error_invalid_path,
 }
