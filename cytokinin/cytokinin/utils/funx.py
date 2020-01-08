@@ -1,4 +1,5 @@
 from pathlib import Path
+import numpy as np
 import pandas as pd
 from pandas.api.types import infer_dtype
 from cytokinin.config import ERROR
@@ -25,3 +26,19 @@ def infer_file_cols_dtypes(filepath, ftype='csv', skipna=True):
         types[c] = infer_dtype(temp_df[c], skipna=skipna)
     return types
 
+def ar1hot(n, mx):
+    '''
+        Args:
+            n (int): class
+            mx (int): max class or classes amount
+        
+        Returns:
+            (np.array): The 1-hot encoded number n
+        
+        Example:
+            ar1hot(1,4)
+            # [0,1,0,0,0]
+    '''
+    ar = np.zeros(int(mx+1)).astype(int)
+    ar[n] = 1
+    return ar

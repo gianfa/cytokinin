@@ -73,7 +73,7 @@ def select_df_col(filepath, ftype='csv'):
                       command=None,
                       font='Arial 11 bold',
                       value=col).pack(anchor=tk.W)
-    tk.Button(text ="Confirm", command = close_window).pack(side="bottom")
+    tk.Button(root, text ="Confirm", command = close_window).pack(side=tk.BOTTOM)
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
     return v.get()

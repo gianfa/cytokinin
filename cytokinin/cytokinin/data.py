@@ -1,9 +1,11 @@
 '''
     Currently the main class of the library
     TODO:
+        * filesnames_to_ml_df: generate from filesnames and labels
         * fix exports in order to make stupidly easy to be used for fit()
         * fix interactive labeling for CSV
         * replace "rais Exception ..." expressions with ERROR[.....] from config.py
+        * expell_to: add compress parameter
 '''
 
 import os
@@ -20,7 +22,7 @@ import cv2
 from cytokinin.config import ERROR
 
 from .utils import interactive
-from .utils.funx import infer_file_cols_dtypes
+from .utils.funx import infer_file_cols_dtypes, ar1hot
 
 logging.basicConfig()
 log = logging.getLogger()
@@ -98,7 +100,7 @@ class Data:
     ### ML dataset ###
     def filesnames_to_ml_df(self,
         xcol_name='X',ycol_name='y',ycol=None,
-        withAbsPath=False, labels2cat=False, y_as='str'):
+        withAbsPath=False, x_as='str', y_as='str'):
         ''' Sticks a target column to self.filesnames
             Args:
                 xcol_name (str):
@@ -114,25 +116,33 @@ class Data:
         xcolName = self.name
         if xcol_name and type(xcol_name) == str: xcolName = xcol_name
         df = self.filesnames.to_frame()
-        if not ycol:
-            df['y'] = self.name # no ycol -> assume all x are from one category
+
         # if we have a ycol -> append it as y col
-        if type(ycol) == list or type(ycol) == np.ndarray:
+        if ycol and type(ycol) == list or type(ycol) == np.ndarray:
             if len(ycol) != len(self.filesnames):
                 raise Exception('WrongArgument: ycol length is different from self.filesnames length')
             df['y'] = np.array(ycol)
-        if y_as == 'str':
-            df['y'] = df['y'].astype(str)
-        if y_as == 'categorical':
-            df['y'] = df['y'].astype("category")
-        if y_as == 'classnum':
-            df['y'] == df['y'].astype("category").cat.codes
-        if y_as == '1hot':
-            df['y'] == pd.get_dummies(df['y']).values
+        elif not ycol and len(self.labels) == 0:
+            df['y'] = self.name # no ycol -> assume all x are from one category
+        else: df['y'] = self.labels
+        df.rename(columns={self.name: xcolName, 'y': ycol_name}, inplace=True) 
+
         if withAbsPath:
             to_abs_path = lambda x: os.path.abspath(x) if type(x) != pathlib.PosixPath else x.absolute()
             df[xcolName] = df[xcolName].map(to_abs_path)
-        df.rename(columns={self.name: xcolName, 'y': ycol_name}, inplace=True)  
+        if x_as == 'str':
+            df[xcolName] = df[xcolName].astype(str)
+
+        if y_as == 'str':
+            df[ycol_name] = df[ycol_name].astype(str)
+        if y_as == 'categorical':
+            df[ycol_name] = df[ycol_name].astype("category")
+        if y_as == '1hot':
+            df[ycol_name] = pd.get_dummies(df[ycol_name]).values
+            mx = df[ycol_name].unique().max()
+            df[ycol_name] = df[ycol_name].apply(lambda x: ar1hot(x, mx))
+        if y_as == 'classnum':
+            df[ycol_name] = pd.get_dummies(df[ycol_name]).values 
         return df
 
     #TODO
@@ -265,15 +275,16 @@ class Data:
             return
         if not filepath and not gui:
             ERROR['missing_argument'](f'You must specify at least one argument between \'filepath\' or \'gui\'!')
-        if not gui and (type(filepath) != str and type(filepath) != PosixPath): raise Exception(f'Wrong argument: You must provide a CSV path a str or PosixPath, instead it was {type(filepath)}')
-        if not gui and not col or type(col) != str:
-            raise Exception('You must provide a col name as str')
-        
         fpath = filepath
-        if gui:
+        if not gui:
+            if (type(filepath) != str and type(filepath) != PosixPath): raise Exception(f'Wrong argument: You must provide a CSV path a str or PosixPath, instead it was {type(filepath)}')
+            if not col or type(col) != str:
+                raise Exception('You must provide a col name as str')
+        else:
+            log.debug(f'This is an experimental feature, therefore may not work properly')
             fpath = interactive.select_filename(title='Select a CSV file')
             col = interactive.select_df_col(fpath, ftype='csv')
-    
+        log.debug(f'COL: {col}')
         df = pd.read_csv(fpath, usecols=[col])
         fn_len = len(self.filesnames)
         if not len(df) == fn_len:
@@ -382,7 +393,8 @@ class Data:
         mldf = self.filesnames_to_ml_df(
                     xcol_name=xcol_name,
                     ycol_name=ycol_name,
-                    labels2cat = labels2cat,
+                    x_as='str',
+                    y_as='',
                 )
         dg = ImageDataGenerator(**imagedatagenerator_args)
         ffdf = dg.flow_from_dataframe(
