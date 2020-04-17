@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='cytokinin',
-    version='0.0.2',
+    version='0.1.0',
     description='Promotes data rooting and make your ML projects to flourish',
     author='Gianfrancesco Angelini',
     author_email='gian.angelini@hotmail.com',
