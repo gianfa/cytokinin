@@ -110,3 +110,26 @@ def test_export_to_keras():
 
 #def test_export_to_fastAI()
 
+# transformations = transforms.Compose([
+#     transforms.Resize((224,224),interpolation=Image.NEAREST), # NEEDED if you want to use *batch_size*
+#     transforms.ToTensor()
+# ])
+# t_df = pd_Dataset(mldf, transformations, colors='L')
+# t_df
+# ## TEST ##
+# def test_pd_Dataset_colors():
+#     transformations = transforms.Compose([
+#         transforms.Resize((128,128),interpolation=Image.NEAREST), # NEEDED if you want to use *batch_size*
+#         transforms.ToTensor()
+#     ])
+#     t_df = pd_Dataset(mldf, transformations)
+#     sh = [im[0].numpy().shape for im in t_df]
+#     assert sum([s[0] != 1 for s in sh]) > 0, \
+#     'Error: with no colors defined, a list of different channels sizes (dim 0 of tensors) is expected!'
+    
+#     # colors = 'L' # PIL greyscale
+#     t_df = pd_Dataset(mldf, transformations, colors='L')
+#     sh = [im[0].numpy().shape for im in t_df]
+#     assert sum([s[0] != 1 for s in sh]) == 0, \
+#     'BatchShapeIncongruent: all images in batch must have only 1 channel'
+    

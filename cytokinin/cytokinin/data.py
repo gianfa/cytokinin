@@ -4,7 +4,7 @@
         * filesnames_to_ml_df: generate from filesnames and labels
         * fix exports in order to make stupidly easy to be used for fit()
         * fix interactive labeling for CSV
-        * replace "rais Exception ..." expressions with ERROR[.....] from config.py
+        * replace "rise Exception ..." expressions with ERROR[.....] from config.py
         * expell_to: add compress parameter
 '''
 
@@ -18,6 +18,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from PIL import Image
 import cv2
 from cytokinin.config import ERROR
 
@@ -36,12 +37,17 @@ class Data:
     '''
         Class of a Data root. Each Data root can be of only one datatype.
     '''
-    def __init__(self):
+    def __init__(self, torch_tsfm=None, color_mode=None):
         self.name = self.new_name()
         self.parents = [] 
         self.filesnames = pd.Series([], name=self.name)
         self.labels = pd.Series([], name=self.name)
+        self.classes2num = None
+        self.num2classes = None
         self.datatype  = None
+        self.colormode = self.set_colormode(color_mode) # L, RGB, check: PIL, https://github.com/python-pillow/Pillow/blob/5.1.x/docs/handbook/concepts.rst#id3
+        self.label_type = 'num'
+        self.torch_tsfm = torch_tsfm # pytorch transform
         self.__allowed_datatypes = {
             'images': [
                 #cv2 supported, ref: https://docs.opencv.org/3.4/d4/da8/group__imgcodecs.html#ga288b8b3da0892bd651fce07b3bbd3a56
@@ -77,9 +83,50 @@ class Data:
         '''
         if len(self.filesnames) != len(self.labels):
             return 0
-        return self.filesnames
+        return len(self.filesnames)
     
+    def __getitem__(self, idx):
+        # in order to be used in a torch.Dataloader needs a colormode to be set
+        if self.torch_tsfm:
+            if not self.colormode:
+                self.set_colormode('RGB')
+                log.warning("No default colormode set, this can lead to different \
+                    Pytorch Tensors sizes. 'RGB' has been chosen as default")
+        if type(idx) == int:
+            img_path = self.filesnames.iloc[idx]
+            label = self.labels.iloc[idx]
+            img = self.read_img(img_path)
+            if self.torch_tsfm:
+                img = self.torch_tsfm(img)
+            return img, self.classes2num[label]
+        if type(idx) == slice:
+            start = idx.start
+            stop = idx.stop
+            step = idx.step
+            img_paths = self.filesnames.iloc[start:stop:step]
+            
+            if self.torch_tsfm: # prepare the output for torch
+                labels = self.labels.iloc[start:stop:step]
+                x_y = []
+                for i, img_path in enumerate(img_paths):
+                    img = self.read_img(img_path)
+                    img = self.torch_tsfm(img)
+                    x_y.append(( img, self.classes2num[labels[i]] ))
+            else:
+                labels = self.labels.iloc[start:stop:step]
+                x_y = [(self.read_img(img), labels[i]) for i, img in enumerate(img_paths)]
+            return x_y
+        raise Exception()
+        return
+
+    def set_transforms(self, tsfm):
+        self.torch_tsfm = tsfm
+        return
     
+    def set_colormode(self, cm):
+        self.colormode = str(cm).upper() if cm is not None else None
+        return
+
     def new_name(self):
         pred = 'data'
         tstamp = str(time.time()).replace('.','')
@@ -112,6 +159,16 @@ class Data:
                     * 'categorical': Pandas 'category' type;
                     * 'classnum': int referred to the class;
                     * '1hot': binary matrix in 1-hot encoding, referred to the class.
+            
+            Example:
+                # Example1:
+                # from Data objects and csv labels
+                dogs = take_data('images').store_filesnames_from_folder(IMGS.joinpath('dog'))
+                stones = take_data('images').store_filesnames_from_folder(IMGS.joinpath('stone'))
+                dands = dogs.copy().add_from_data(stones)
+                csv_url = MOCKS/'labels'/'dogsandstones_labes.csv'
+                dands.label_from_csv(csv_url, col='Y')
+                dands.filesnames_to_ml_df()
         '''
         xcolName = self.name
         if xcol_name and type(xcol_name) == str: xcolName = xcol_name
@@ -142,7 +199,7 @@ class Data:
             mx = df[ycol_name].unique().max()
             df[ycol_name] = df[ycol_name].apply(lambda x: ar1hot(x, mx))
         if y_as == 'classnum':
-            df[ycol_name] = pd.get_dummies(df[ycol_name]).values 
+            df[ycol_name] = [self.classes2num[l] for l in df[ycol_name].values] 
         return df
 
     #TODO
@@ -242,6 +299,13 @@ class Data:
 
 
     ### UTILS ###
+    def read_img(self, img_path, cmode = None, asarray=False):
+        img = Image.open(str(img_path))
+        if cmode is not None: img = img.convert(cmode) # priority
+        if not cmode and self.colormode: img = img.convert(self.colormode)
+        if asarray: return np.array(img)
+        return img
+
     def is_df(self, o):
         return isinstance(o, pd.DataFrame)
 
@@ -249,6 +313,14 @@ class Data:
         return isinstance(o, pd.Series)
 
     ### LABEL ###
+    def store_labels(self, lista):
+        #TODO: CHECK COEHERENCE extending the map during self.add_from_data. you can have not-unique id
+        self.labels = lista
+        u = np.unique(lista).tolist()
+        self.classes2num = { c:i for i,c in enumerate(u)}
+        self.num2classes = dict(enumerate(lista))
+        return
+
     def label_from_folder(self):
         '''
             Reads the path of the stored filesnames and uses
@@ -257,7 +329,7 @@ class Data:
         if len(self.filesnames) == 0:
             log.warn(f'{self.name} Data hasn\'t any filesname to label yet')
             return
-        self.labels = self.filesnames.apply(lambda x: x.parent.name)
+        self.store_labels(self.filesnames.apply(lambda x: x.parent.name))
         return
 
     def label_from_csv(self, filepath=None, col=None, gui=False, **kwargs):
@@ -289,7 +361,7 @@ class Data:
         fn_len = len(self.filesnames)
         if not len(df) == fn_len:
             raise Exception(f'Mismatching dimensions between stored filenames {fn_len} and labels {len(df)}!')
-        self.labels = df[col]
+        self.store_labels(df[col])
         return
 
     ## SHOW ##
@@ -297,11 +369,6 @@ class Data:
 
     ## TO ##
     def to(self, outtype='list', array_mode=None, limit_from=0, limit_to=None ):
-        map2cv2 = {
-            'rgb': cv2.IMREAD_COLOR,
-            'gray': cv2.IMREAD_GRAYSCALE,
-            'grey': cv2.IMREAD_GRAYSCALE,
-        }
         # cut the set
         if limit_to: out = self.filesnames[limit_from:limit_to]
         else: out = self.filesnames[limit_from:]
@@ -312,10 +379,8 @@ class Data:
         if outtype == 'series': return self.filesnames
         if outtype == 'arrays':
             al = self.filesnames.to_list()
-            if not array_mode: return [ cv2.imread(str(f)) for f in al ]
-            if not array_mode in map2cv2.keys():
-                raise Exception('Invalid "array_mode" argument! it must be "rgb" or "gray"')
-            return [ cv2.imread(f, map2cv2[array_mode]) for f in al ]
+            if not array_mode: return [ self.read_img(f, asarray=True) for f in al ]
+            return [ self.read_img(f, array_mode) for f in al ]
         raise Exception('Invalid "format" argument!')
 
     ## ADD DATA ##
@@ -426,10 +491,14 @@ class Data:
     
     # TODO
     def export_to_pytorch(self):
-        # https://discuss.pytorch.org/t/dataloading-using-pandas/33833/2
         # df = pd.read_csv(csvFilePath)
         # tmp = df.values
         # result = torch.from_numpy(tmp)
+        try:
+            from fastai.vision import ImageDataBunch, ImageList
+            from fastai.vision.transform import get_transforms
+        except ModuleNotFoundError as e:
+            ERROR['missing_module']('fastai')
         pass
     
     # TODO
