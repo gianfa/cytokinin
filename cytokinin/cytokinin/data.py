@@ -34,18 +34,33 @@ def take_data(datatype):
     return Data().take_data(datatype)
 
 class Data:
-    '''
-        Class of a Data root. Each Data root can be of only one datatype.
+    '''Class of a Data root. Each Data root can be of only one datatype.
+
+        Attributes:
+            name (str):
+            parents ():
+            filesnames (pandas.Series): paths of the samples
+            labels (pandas.Series):
+            _classes2num (dict): a map from unique classes to a int
+            _num2classes (dict): a map from unique ints to unuique classes in Data
+            _datatype ():
+    
     '''
     def __init__(self, torch_tsfm=None, color_mode=None):
+        '''
+            Args:
+                torch_tsfm ():
+                color_mode ():  Default color mode to open images accordingly, when retrieved.
+                    It is a PIL Mode, like 'L' and 'RGB', check: PIL Modes, https://github.com/python-pillow/Pillow/blob/5.1.x/docs/handbook/concepts.rst#id3
+        '''
         self.name = self.new_name()
         self.parents = [] 
         self.filesnames = pd.Series([], name=self.name)
         self.labels = pd.Series([], name=self.name)
-        self.classes2num = None
-        self.num2classes = None
-        self.datatype  = None
-        self.colormode = self.set_colormode(color_mode) # L, RGB, check: PIL, https://github.com/python-pillow/Pillow/blob/5.1.x/docs/handbook/concepts.rst#id3
+        self._classes2num = None
+        self._num2classes = None
+        self._datatype  = None
+        self.colormode = self.set_colormode(color_mode) if color_mode else None
         self.label_type = 'num'
         self.torch_tsfm = torch_tsfm # pytorch transform
         self.__allowed_datatypes = {
@@ -67,7 +82,7 @@ class Data:
     def __str__(self):
         args = (
             type(self),
-            self.datatype,
+            self._datatype,
             len(self.filesnames),
             len(self.labels)
         )
@@ -98,7 +113,7 @@ class Data:
             img = self.read_img(img_path)
             if self.torch_tsfm:
                 img = self.torch_tsfm(img)
-            return img, self.classes2num[label]
+            return img, self._classes2num[label]
         if type(idx) == slice:
             start = idx.start
             stop = idx.stop
@@ -111,7 +126,7 @@ class Data:
                 for i, img_path in enumerate(img_paths):
                     img = self.read_img(img_path)
                     img = self.torch_tsfm(img)
-                    x_y.append(( img, self.classes2num[labels[i]] ))
+                    x_y.append(( img, self._classes2num[labels[i]] ))
             else:
                 labels = self.labels.iloc[start:stop:step]
                 x_y = [(self.read_img(img), labels[i]) for i, img in enumerate(img_paths)]
@@ -137,11 +152,11 @@ class Data:
         return copy.deepcopy(self)
 
     def take_data(self, datatype):
-        if self.datatype:
+        if self._datatype:
             raise Exception('This Data is already taken! fill it with more files or build another one!')
         if not datatype in self.__allowed_datatypes.keys():
             raise Exception('Datatype "{cat}" not allowed!'.format(cat=datatype))
-        self.datatype = datatype
+        self._datatype = datatype
         return self
     
     ### ML dataset ###
@@ -199,7 +214,7 @@ class Data:
             mx = df[ycol_name].unique().max()
             df[ycol_name] = df[ycol_name].apply(lambda x: ar1hot(x, mx))
         if y_as == 'classnum':
-            df[ycol_name] = [self.classes2num[l] for l in df[ycol_name].values] 
+            df[ycol_name] = [self._classes2num[l] for l in df[ycol_name].values] 
         return df
 
     #TODO
@@ -239,9 +254,9 @@ class Data:
         '''
         EXTS = None
         if exts:
-            EXTS = self.__allowed_datatypes[self.datatype].intersection(set(exts))
+            EXTS = self.__allowed_datatypes[self._datatype].intersection(set(exts))
             if len(EXTS) == 0:
-                raise Exception('Invalid or not allowed extensions for "{tp}" files.'.format(tp=self.datatype))
+                raise Exception('Invalid or not allowed extensions for "{tp}" files.'.format(tp=self._datatype))
         else: EXTS = self.__allowed_datatypes
         
         temp_flist=set()
@@ -317,8 +332,8 @@ class Data:
         #TODO: CHECK COEHERENCE extending the map during self.add_from_data. you can have not-unique id
         self.labels = lista
         u = np.unique(lista).tolist()
-        self.classes2num = { c:i for i,c in enumerate(u)}
-        self.num2classes = dict(enumerate(lista))
+        self._classes2num = { c:i for i,c in enumerate(u)}
+        self._num2classes = dict(enumerate(lista))
         return
 
     def label_from_folder(self):
@@ -387,7 +402,7 @@ class Data:
     def add_from_data(self, do, exts=None, notallowedfiles='ignore',  notfiles='ignore', uniques=True, verbose=False):
         if type(do) != type(Data()):
             raise Exception('The "do" argument was not a Data type!')
-        if do.datatype != self.datatype:
+        if do.datatype != self._datatype:
             raise Exception('Datatype of "{nm}" Data object is {dt}, different from this Data datatype'.format(nm=do.name, dt=do.datatype))
         flist = do.to('list')
         self.store_filesnames_from_list(
