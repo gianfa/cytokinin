@@ -3,8 +3,7 @@ python:
   - 3.8
 # command to install dependencies
 install:
-  - ls
-  - pip install -r cytokin/requirements.txt
+  - pip install -r cytokinin/requirements.txt
 # command to run tests
 script:
   - pytest
